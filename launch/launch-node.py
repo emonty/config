@@ -45,7 +45,7 @@ def get_client():
     client = Client(*args, **kwargs)
     return client
 
-def bootstrap_server(server, admin_pass, key, cert, environment):
+def bootstrap_server(name, server, admin_pass, key, cert, environment):
     client = server.manager.api
     ip = utils.get_public_ip(server)
     if not ip:
@@ -64,6 +64,8 @@ def bootstrap_server(server, admin_pass, key, cert, environment):
     if not ssh_client:
         raise Exception("Unable to log in via SSH")
 
+    ssh_client.ssh('sudo hostname %s' % name)
+
     if username != 'root':
         ssh_client.ssh("sudo cp ~/.ssh/authorized_keys"
                        " ~root/.ssh/authorized_keys")
@@ -76,32 +78,12 @@ def bootstrap_server(server, admin_pass, key, cert, environment):
                    'install_puppet.sh')
     ssh_client.ssh('bash -x install_puppet.sh')
 
-    certname = cert[:0-len('.pem')]
-    ssh_client.ssh("mkdir -p /var/lib/puppet/ssl/certs")
-    ssh_client.ssh("mkdir -p /var/lib/puppet/ssl/private_keys")
-    ssh_client.ssh("mkdir -p /var/lib/puppet/ssl/public_keys")
-    ssh_client.ssh("chown -R puppet:root /var/lib/puppet/ssl")
-    ssh_client.ssh("chmod 0771 /var/lib/puppet/ssl")
-    ssh_client.ssh("chmod 0755 /var/lib/puppet/ssl/certs")
-    ssh_client.ssh("chmod 0750 /var/lib/puppet/ssl/private_keys")
-    ssh_client.ssh("chmod 0755 /var/lib/puppet/ssl/public_keys")
+    ssh_client.ssh('git clone https://github.com/emonty/config')
+    ssh_client.ssh('bash config/install_modules.sh')
 
-    for ssldir in ['/var/lib/puppet/ssl/certs/',
-                   '/var/lib/puppet/ssl/private_keys/',
-                   '/var/lib/puppet/ssl/public_keys/']:
-        ssh_client.scp(os.path.join(ssldir, cert),
-                       os.path.join(ssldir, cert))
-
-    ssh_client.scp("/var/lib/puppet/ssl/crl.pem",
-                   "/var/lib/puppet/ssl/crl.pem")
-    ssh_client.scp("/var/lib/puppet/ssl/certs/ca.pem",
-                   "/var/lib/puppet/ssl/certs/ca.pem")
-
-    ssh_client.ssh("puppet agent "
-                   "--environment %s "
-                   "--server ci-puppetmaster.openstack.org "
-                   "--no-daemonize --verbose --onetime --pluginsync true "
-                   "--certname %s" % (environment, certname))
+    ssh_client.ssh('puppet apply'
+                   ' --modulepath=`pwd`/config/modules:/etc/puppet/modules'
+		   ' config/manifests/site.pp')
 
 def build_server(client, name, image, flavor, cert, environment):
     key = None
@@ -127,7 +109,7 @@ def build_server(client, name, image, flavor, cert, environment):
     try:
         admin_pass = server.adminPass
         server = utils.wait_for_resource(server)
-        bootstrap_server(server, admin_pass, key, cert, environment)
+        bootstrap_server(name, server, admin_pass, key, cert, environment)
         if key:
             kp.delete()
     except Exception, real_error:

@@ -287,4 +287,8 @@ node /^.*\.jclouds\.openstack\.org$/ {
   }
 }
 
+node 'mordred-dev.inaugust.com' {
+  class { 'openstack_project::server': }
+}
+
 # vim:sw=2:ts=2:expandtab:textwidth=79
