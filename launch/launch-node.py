@@ -30,19 +30,27 @@ import utils
 
 NOVA_USERNAME=os.environ['OS_USERNAME']
 NOVA_PASSWORD=os.environ['OS_PASSWORD']
-NOVA_URL=os.environ['OS_AUTH_URL']
 NOVA_PROJECT_ID=os.environ['OS_TENANT_NAME']
 NOVA_REGION_NAME=os.environ['OS_REGION_NAME']
+OS_AUTH_SYSTEM=os.environ['OS_AUTH_SYSTEM']
+
+
 
 SCRIPT_DIR = os.path.dirname(sys.argv[0])        
 
 def get_client():
-    args = [NOVA_USERNAME, NOVA_PASSWORD, NOVA_PROJECT_ID, NOVA_URL]
+    import novaclient
+    if OS_AUTH_SYSTEM and OS_AUTH_SYSTEM != 'keystone':
+        os_auth_url = novaclient.client.get_auth_system_url(OS_AUTH_SYSTEM)
+    else:
+	os_auth_url = os.environ['OS_AUTH_URL']
+    args = [NOVA_USERNAME, NOVA_PASSWORD, NOVA_PROJECT_ID, os_auth_url]
     kwargs = {}
     kwargs['region_name'] = NOVA_REGION_NAME
     kwargs['service_type'] = 'compute'
     from novaclient.v1_1.client import Client
     client = Client(*args, **kwargs)
+
     return client
 
 def bootstrap_server(name, server, admin_pass, key, environment):
@@ -52,9 +60,7 @@ def bootstrap_server(name, server, admin_pass, key, environment):
         raise Exception("Unable to find public ip of server")
 
     ssh_kwargs = {}
-    if key:
-        ssh_kwargs['pkey'] = key
-    else:
+    if not key:
         ssh_kwargs['password'] = admin_pass
 
     for username in ['root', 'ubuntu']:
@@ -64,7 +70,7 @@ def bootstrap_server(name, server, admin_pass, key, environment):
     if not ssh_client:
         raise Exception("Unable to log in via SSH")
 
-    ssh_client.ssh('sudo hostname %s' % name)
+    ssh_client.ssh('sudo hostname `curl http://169.254.169.254/2009-04-04/meta-data/hostname`' % name)
 
     if username != 'root':
         ssh_client.ssh("sudo cp ~/.ssh/authorized_keys"
@@ -74,14 +80,10 @@ def bootstrap_server(name, server, admin_pass, key, environment):
 
     ssh_client = utils.ssh_connect(ip, 'root', ssh_kwargs, timeout=600)
 
-    ssh_client.scp(os.path.join(SCRIPT_DIR, '..', 'install_puppet.sh'),
-                   'install_puppet.sh')
-    ssh_client.ssh('bash -x install_puppet.sh')
-
     ssh_client.ssh('git clone https://github.com/emonty/config')
-    ssh_client.ssh('bash config/install_modules.sh')
+    ssh_client.ssh('sudo bash -x config/install_modules.sh')
 
-    ssh_client.ssh('puppet apply'
+    ssh_client.ssh('sudo puppet apply'
                    ' --modulepath=`pwd`/config/modules:/etc/puppet/modules'
 		   ' config/manifests/site.pp')
 
@@ -91,16 +93,12 @@ def build_server(client, name, image, flavor, environment):
 
     create_kwargs = dict(image=image, flavor=flavor, name=name)
 
-    key_name = 'launch-%i' % (time.time())
     if 'os-keypairs' in utils.get_extensions(client):
-        print "Adding keypair"
-        key, kp = utils.add_keypair(client, key_name)
-        create_kwargs['key_name'] = key_name
+        create_kwargs['key_name'] = 'mordred'
     try:
         server = client.servers.create(**create_kwargs)
     except Exception, real_error:
         try:
-            kp.delete()
         except Exception, delete_error:
             print "Exception encountered deleting keypair:"
             traceback.print_exc()
@@ -110,11 +108,10 @@ def build_server(client, name, image, flavor, environment):
         admin_pass = server.adminPass
         server = utils.wait_for_resource(server)
         bootstrap_server(name, server, admin_pass, key, environment)
-        if key:
-            kp.delete()
     except Exception, real_error:
         try:
             utils.delete_server(server)
+	    pass
         except Exception, delete_error:
             print "Exception encountered deleting server:"
             traceback.print_exc()
@@ -128,14 +125,11 @@ def main():
     parser.add_argument("--ram", dest="ram", default=1024, type=int,
                         help="minimum amount of ram")
     parser.add_argument("--image", dest="image",
-                        default="Ubuntu 12.04 LTS (Precise Pangolin)",
+                        default="Ubuntu Quantal 12.10 Server 64-bit 20121017",
                         help="image name")
     parser.add_argument("--environment", dest="environment",
                         default="production",
                         help="puppet environment name")
-    parser.add_argument("--cert", dest="cert", required=True,
-                        help="name of signed puppet certificate file (e.g., "
-                        "hostname.example.com.pem)")
     options = parser.parse_args()
 
     client = get_client()
