@@ -95,14 +95,7 @@ def build_server(client, name, image, flavor, environment):
 
     if 'os-keypairs' in utils.get_extensions(client):
         create_kwargs['key_name'] = 'mordred'
-    try:
-        server = client.servers.create(**create_kwargs)
-    except Exception, real_error:
-        try:
-        except Exception, delete_error:
-            print "Exception encountered deleting keypair:"
-            traceback.print_exc()
-        raise
+    server = client.servers.create(**create_kwargs)
 
     try:
         admin_pass = server.adminPass
