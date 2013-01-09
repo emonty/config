@@ -45,7 +45,7 @@ def get_client():
     client = Client(*args, **kwargs)
     return client
 
-def bootstrap_server(name, server, admin_pass, key, cert, environment):
+def bootstrap_server(name, server, admin_pass, key, environment):
     client = server.manager.api
     ip = utils.get_public_ip(server)
     if not ip:
@@ -85,7 +85,7 @@ def bootstrap_server(name, server, admin_pass, key, cert, environment):
                    ' --modulepath=`pwd`/config/modules:/etc/puppet/modules'
 		   ' config/manifests/site.pp')
 
-def build_server(client, name, image, flavor, cert, environment):
+def build_server(client, name, image, flavor, environment):
     key = None
     server = None
 
@@ -109,7 +109,7 @@ def build_server(client, name, image, flavor, cert, environment):
     try:
         admin_pass = server.adminPass
         server = utils.wait_for_resource(server)
-        bootstrap_server(name, server, admin_pass, key, cert, environment)
+        bootstrap_server(name, server, admin_pass, key, environment)
         if key:
             kp.delete()
     except Exception, real_error:
@@ -140,10 +140,6 @@ def main():
 
     client = get_client()
 
-    if not os.path.exists(os.path.join("/var/lib/puppet/ssl/private_keys",
-                                       options.cert)):
-        raise Exception("Please specify the name of a signed puppet cert.")
-
     flavors = [f for f in client.flavors.list() if f.ram >= options.ram]
     flavors.sort(lambda a, b: cmp(a.ram, b.ram))
     flavor = flavors[0]
@@ -169,7 +165,7 @@ def main():
     image = images[0]
     print "Found image", image
 
-    build_server(client, options.name, image, flavor, options.cert, options.environment)
+    build_server(client, options.name, image, flavor, options.environment)
 
 if __name__ == '__main__':
     main()
